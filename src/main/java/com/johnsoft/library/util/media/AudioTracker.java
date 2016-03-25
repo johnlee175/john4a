@@ -15,7 +15,7 @@ public class AudioTracker
 	private AudioTrack mAudioTrack;
 	private short[] mBuffer;
 	
-	private int sampleRateInHz = 8000; //11025, 22050, 44100
+	private int sampleRateInHz = 44100; //11025, 22050, 44100
 	private int channelConfig = AudioFormat.CHANNEL_OUT_MONO; //AudioFormat.CHANNEL_OUT_STEREO
 	private int audioFormat = AudioFormat.ENCODING_PCM_16BIT; //As now the vast majority of audio is 16
 	private int streamType = AudioManager.STREAM_MUSIC; //AudioManager.STREAM_VOICE_CALL

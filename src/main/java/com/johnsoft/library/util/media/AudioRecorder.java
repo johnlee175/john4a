@@ -16,7 +16,7 @@ public class AudioRecorder
 	private AudioRecord mAudioRecord;
 	private short[] mBuffer;
 	
-	private int sampleRateInHz = 8000; //11025, 22050, 44100
+	private int sampleRateInHz = 44100; //11025, 22050, 44100
 	private int channelConfig = AudioFormat.CHANNEL_IN_MONO; //AudioFormat.CHANNEL_IN_STEREO
 	private int audioFormat = AudioFormat.ENCODING_PCM_16BIT;//As now the vast majority of audio is 16
 	private int audioSource = MediaRecorder.AudioSource.MIC; //MediaRecorder.AudioSource.VOICE_RECOGNITION...
