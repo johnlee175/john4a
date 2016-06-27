@@ -3,8 +3,6 @@ package com.johnsoft.library.util;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import android.util.Log;
-
 /**
  * 命名线程的创建工厂
  * @author John Kenrinus Lee
@@ -47,8 +45,8 @@ public class NameableThreadFactory implements ThreadFactory {
                 t = customThreadClass.getConstructor(ThreadGroup.class, Runnable.class, String.class, long.class)
                         .newInstance(group, r, namePrefix + threadNumber.getAndIncrement(), 0);
             } catch (Exception e) {
-                Log.w("System.err", e);
-                Log.w("System.err", "Create Thread failed from " + customThreadClass.getSimpleName()
+                e.printStackTrace();
+                System.err.println("Create Thread failed from " + customThreadClass.getSimpleName()
                         + ", the default Thread class had apply. "
                         + "please see stacktrace printing of Throwable above, "
                         + "and consider that whether there's a constructor "

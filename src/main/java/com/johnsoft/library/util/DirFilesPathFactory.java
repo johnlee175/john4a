@@ -1,6 +1,7 @@
 package com.johnsoft.library.util;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -17,10 +18,10 @@ public class DirFilesPathFactory implements FilePathFactory {
     private final List<File> files;
     private final boolean loop;
     private ListIterator<File> iterator;
-    public DirFilesPathFactory(File directory, boolean loopProvider, boolean sort) {
+    public DirFilesPathFactory(File directory, FileFilter filter, boolean loopProvider, boolean sort) {
         if (directory == null || !directory.exists()
                 || !directory.isDirectory() || !directory.canRead()) {
-            throw new RuntimeException("DirFilesPathFactory: the param named directory"
+            throw new RuntimeException("DirFilesPathFactory: the param named directory "
             + "is null or is not a folder or not exists or can't read.");
         }
         final List<File> fileList;
@@ -29,7 +30,15 @@ public class DirFilesPathFactory implements FilePathFactory {
         } else {
             fileList = new LinkedList<>();
         }
-        walkByDepthFirst(directory, fileList);
+        if (filter == null) {
+            filter = new FileFilter() {
+                @Override
+                public boolean accept(File pathname) {
+                    return true;
+                }
+            };
+        }
+        walkByDepthFirst(directory, filter, fileList);
         if (sort) {
             Collections.sort(fileList);
         }
@@ -52,7 +61,7 @@ public class DirFilesPathFactory implements FilePathFactory {
         return null;
     }
 
-    private void walkByDepthFirst(File file, List<File> files) {
+    private void walkByDepthFirst(File file, FileFilter fileFilter, List<File> files) {
         final LinkedList<File> stack = new LinkedList<>();
         stack.addFirst(file); //push
         while (!stack.isEmpty()) {
@@ -65,7 +74,9 @@ public class DirFilesPathFactory implements FilePathFactory {
                     }
                 }
             } else {
-                files.add(file);
+                if (fileFilter.accept(file)) { //filter
+                    files.add(file);
+                }
             }
         }
     }

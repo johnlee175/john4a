@@ -90,7 +90,8 @@ public final class ZipUtils {
                 }
                 for (final File originFile : originFiles) {
                     if (originFile == null || !originFile.exists()) {
-                        throw new IllegalArgumentException("Zipping files: src or dst is invalid.");
+                        throw new IllegalArgumentException("Zipping files: src or dst is invalid. Origin: ["
+                                + (originFile == null ? "null" : originFile.getAbsolutePath()) + "].");
                     }
                     zipFile(originFile, zipOutput, "", filter);
                 }

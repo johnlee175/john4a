@@ -5,6 +5,9 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -13,15 +16,13 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import android.util.Log;
-
 /**
  * A common sink which using nio and will pre-open a new file async so that swap file smooth.
  * @author John Kenrinus Lee
  * @version 2016-02-18
  */
 public final class DiskBlockSliceSink implements Closeable {
-    private final Object LOCK = new byte[0];
+    private final byte[] LOCK = new byte[0];
 
     private final long mFileFixSize;
     private final float mPreOpenThreshold;
@@ -29,14 +30,17 @@ public final class DiskBlockSliceSink implements Closeable {
     private final FilePathFactory mPathFactory;
     private final ExecutorService mSingleAsyncThread;
 
-    private FileChannel mFileChannel;
-    private FileChannel mFileChannelBak;
+    private PathFileChannel mFileChannel;
+    private PathFileChannel mFileChannelBak;
     private Future<?> mFuture;
     private volatile boolean mIsPreOpenCalled;
     private volatile boolean mHadPreOpened;
     private volatile boolean mIsSinkOpen;
     private int mOffset;
     private int mSyncRemainingCount;
+
+    private final List<FileSwitchListener> mListeners;
+    private final ExecutorService mFireListenersThread;
 
     /**
      * @param pFileFixSize the block file size, the minimum value is 1K;
@@ -54,19 +58,19 @@ public final class DiskBlockSliceSink implements Closeable {
             mFileFixSize = pFileFixSize;
         } else {
             mFileFixSize = 1024L;
-            Log.w("System.err", "Using default FileFixSize.");
+            System.err.println("Using default FileFixSize.");
         }
         if (pPreOpenThreshold > 0.0F && pPreOpenThreshold < 1.0F) {
             mPreOpenThreshold = pPreOpenThreshold;
         } else {
             mPreOpenThreshold = 0.2F;
-            Log.w("System.err", "Using default PreOpenThreshold.");
+            System.err.println("Using default PreOpenThreshold.");
         }
         if (pSyncPeriod > 0) {
             mSyncPeriod = pSyncPeriod;
         } else {
             mSyncPeriod = 1;
-            Log.w("System.err", "Using default SyncPeriod.");
+            System.err.println("Using default SyncPeriod.");
         }
         if (pPathFactory == null) {
             throw new NullPointerException("DiskBlockSliceSink constructor need a FilePathFactory instance, "
@@ -76,6 +80,10 @@ public final class DiskBlockSliceSink implements Closeable {
         mSingleAsyncThread = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<Runnable>(), new NameableThreadFactory("DiskBlockSliceSink-SwapFile"));
         mIsSinkOpen = true;
+
+        mListeners = Collections.synchronizedList(new ArrayList<FileSwitchListener>());
+        mFireListenersThread = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>(), new NameableThreadFactory("DiskBlockSliceSink-FireListeners"));
     }
 
     public final void close() {
@@ -83,6 +91,7 @@ public final class DiskBlockSliceSink implements Closeable {
             if (mIsSinkOpen) {
                 lastClose(true);
                 mSingleAsyncThread.shutdownNow();
+                mFireListenersThread.shutdownNow();
                 mIsSinkOpen = false;
             }
         }
@@ -143,13 +152,14 @@ public final class DiskBlockSliceSink implements Closeable {
         mOffset += remaining;
     }
 
-    private FileChannel openFileChannel() throws IOException {
+    private PathFileChannel openFileChannel() throws IOException {
         //9025.487 ± 53.311  ns/op
         //106592.926 ± 4086.916  ops/s
 //        return new FileOutputStream(mPathFactory.getNextFilePath()).getChannel();
         //5074.877 ± 27.325  ns/op
         //199157.991 ± 8375.167  ops/s
-        return new RandomAccessFile(mPathFactory.getNextFilePath(), "rwd").getChannel();
+        final String filePath = mPathFactory.getNextFilePath();
+        return new PathFileChannel(new RandomAccessFile(filePath, "rwd").getChannel(), filePath);
     }
 
     private void firstOpen() throws IOException {
@@ -177,9 +187,9 @@ public final class DiskBlockSliceSink implements Closeable {
             try {
                 mFuture.get(5000L, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
-                Log.w("System.err", e);
+                e.printStackTrace();
             } catch (TimeoutException e) {
-                Log.w("System.err", e);
+                e.printStackTrace();
             } catch (ExecutionException e) {
                 Throwable tr = e;
                 while (tr.getCause() != null) {
@@ -203,13 +213,14 @@ public final class DiskBlockSliceSink implements Closeable {
     }
 
     private void close0() {
-        final FileChannel tempChannel = mFileChannel;
+        final PathFileChannel tempChannel = mFileChannel;
         mSingleAsyncThread.submit(new Runnable() {
             @Override
             public void run() {
                 if (tempChannel != null && tempChannel.isOpen()) {
                     try {
                         tempChannel.close();
+                        fireFileClosed(tempChannel.toString());
                     } catch (IOException ignored) {
                     }
                 }
@@ -221,6 +232,7 @@ public final class DiskBlockSliceSink implements Closeable {
         if (mFileChannel != null && mFileChannel.isOpen()) {
             try {
                 mFileChannel.close();
+                fireFileClosed(mFileChannel.toString());
             } catch (IOException ignored) {
             }
             mFileChannel = null;
@@ -245,6 +257,64 @@ public final class DiskBlockSliceSink implements Closeable {
         if (mSyncRemainingCount >= mSyncPeriod) {
             mFileChannel.force(true);
             mSyncRemainingCount = 0;
+        }
+    }
+
+    private void fireFileClosed(final String filePath) {
+        mFireListenersThread.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    for (FileSwitchListener l : mListeners) {
+                        l.onFileClosed(filePath);
+                    }
+                } catch (Exception e) {
+                    System.err.println("throw Exception when fire file closed event to listeners");
+                }
+            }
+        });
+    }
+
+    public boolean addFileSwitchListener(FileSwitchListener listener) {
+        return mListeners.add(listener);
+    }
+
+    public boolean removeFileSwitchListener(FileSwitchListener listener) {
+        return mListeners.remove(listener);
+    }
+
+    public interface FileSwitchListener {
+        void onFileClosed(String filePath);
+    }
+
+    private static final class PathFileChannel {
+        private final FileChannel fileChannel;
+        private final String filePath;
+
+        PathFileChannel(FileChannel channel, String path) {
+            fileChannel = channel;
+            filePath = path;
+        }
+
+        @Override
+        public String toString() {
+            return filePath;
+        }
+
+        public boolean isOpen() {
+            return fileChannel.isOpen();
+        }
+
+        public void close() throws IOException {
+            fileChannel.close();
+        }
+
+        public void write(ByteBuffer src) throws IOException {
+            fileChannel.write(src);
+        }
+
+        public void force(boolean metadata) throws IOException {
+            fileChannel.force(metadata);
         }
     }
 }

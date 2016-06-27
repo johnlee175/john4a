@@ -5,8 +5,6 @@ import java.nio.ByteOrder;
 import java.util.Iterator;
 import java.util.LinkedList;
 
-import android.util.Log;
-
 /**
  * 以模拟Stack栈方式实现的ByteBuffer对象池, 并配以定期销毁长时间未用的多余对象的功能. <br>
  * 注: 采用Stack栈, 频繁的obtain和recycle操作会对线程同步有比较高的要求,
@@ -17,12 +15,13 @@ import android.util.Log;
  * @version 2016-02-18
  */
 public final class ByteBufferPool {
-    private final Object LOCK = new byte[0];
+    private final byte[] LOCK = new byte[0];
     private final LinkedList<Entry> mStack;
     private final CleanupThread mCleanupThread;
     private final int mPoolCapacity;
     private final int mBufferSize;
     private final long mCleanPeriod;
+    private boolean isDestroyed;
 
     /**
      * 如果参数设置错误, 将采用默认值
@@ -34,19 +33,19 @@ public final class ByteBufferPool {
         if (poolCapacity > 1 && poolCapacity <= 1024) {
             mPoolCapacity = poolCapacity;
         } else {
-            Log.w("System.err", "Error set poolCapacity reason: poolCapacity <= 1 or poolCapacity > 1024.");
+            System.err.println("Error set poolCapacity reason: poolCapacity <= 1 or poolCapacity > 1024.");
             mPoolCapacity = 16;
         }
         if (bufferSize >= 8) {
             mBufferSize = bufferSize;
         } else {
-            Log.w("System.err", "Error set bufferSize reason: bufferSize < 8.");
+            System.err.println("Error set bufferSize reason: bufferSize < 8.");
             mBufferSize = 4096;
         }
         if (cleanPeriod >= 1000L) {
             mCleanPeriod = cleanPeriod;
         } else {
-            Log.w("System.err", "Error set cleanPeriod reason: cleanPeriod < 1000.");
+            System.err.println("Error set cleanPeriod reason: cleanPeriod < 1000.");
             mCleanPeriod = 60000L;
         }
         mStack = new LinkedList<>();
@@ -56,13 +55,25 @@ public final class ByteBufferPool {
 
     public boolean isEmpty() {
         synchronized(LOCK) {
+            if (isDestroyed) {
+                throw new IllegalStateException("Byte buffer pool had destroyed");
+            }
             return mStack.isEmpty();
         }
     }
 
     public boolean isFull() {
         synchronized(LOCK) {
+            if (isDestroyed) {
+                throw new IllegalStateException("Byte buffer pool had destroyed");
+            }
             return mPoolCapacity == mStack.size();
+        }
+    }
+
+    public boolean isDestroyed() {
+        synchronized(LOCK) {
+            return isDestroyed;
         }
     }
 
@@ -77,10 +88,16 @@ public final class ByteBufferPool {
         }
     }
 
-    /** 回收对象, 当池满了时, 直接丢弃以参数方式传入的byteBuffer, 此时返回false, 否则返回true, 表示回收成功 */
+    /** 回收对象, 当池满了时, 或重复归还时, 直接丢弃以参数方式传入的byteBuffer, 此时返回false, 否则返回true, 表示回收成功 */
     public boolean recycle(ByteBuffer byteBuffer) {
         synchronized(LOCK) {
             if (!isFull()) {
+                // 判断是否重复归还
+                for (Entry entry : mStack) {
+                    if (entry != null && entry.buffer == byteBuffer) {
+                        return false;
+                    }
+                }
                 byteBuffer.clear();
                 Entry entry = new Entry(byteBuffer, System.currentTimeMillis());
                 mStack.addFirst(entry);
@@ -92,18 +109,25 @@ public final class ByteBufferPool {
     }
 
     public void destroy() {
+        synchronized(LOCK) {
+            if (!isDestroyed) {
+                isDestroyed = true;
+            } else {
+                return;
+            }
+        }
         mCleanupThread.interrupt();
         try {
             mCleanupThread.join(5000L);
         } catch (InterruptedException e) {
-            Log.w("System.err", e);
+            e.printStackTrace();
         }
         synchronized(LOCK) {
             mStack.clear();
         }
     }
 
-    private class Entry {
+    private static class Entry {
         final ByteBuffer buffer;
         final long lastUsedTime;
 
@@ -121,6 +145,9 @@ public final class ByteBufferPool {
         public void run() {
             while (!isInterrupted()) {
                 synchronized(LOCK) {
+                    if (isDestroyed) {
+                        return;
+                    }
                     final long currentTime = System.currentTimeMillis();
                     // 使用倒序不完全遍历(从栈底开始), 因为越是靠近栈顶越是常用,
                     // 当发现超过一定时间未用的池对象时则移除回收, 直到发现那个非超时的即可停止
@@ -141,7 +168,7 @@ public final class ByteBufferPool {
                 try {
                     Thread.sleep(mCleanPeriod);
                 } catch (InterruptedException e) {
-                    Log.w("System.err", e);
+                    e.printStackTrace();
                     break;
                 }
             }

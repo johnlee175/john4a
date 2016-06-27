@@ -13,8 +13,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import android.util.Log;
-
 /**
  * A common source which using nio and will pre-open a new file async so that swap file smooth.
  * @author John Kenrinus Lee
@@ -22,7 +20,7 @@ import android.util.Log;
  */
 public final class DiskBlockSliceSource implements Closeable {
     public static final int ERROR_BAD_READ = -1;
-    private final Object LOCK = new byte[0];
+    private final byte[] LOCK = new byte[0];
 
     private final float mPreOpenThreshold;
     private final FilePathFactory mPathFactory;
@@ -47,7 +45,7 @@ public final class DiskBlockSliceSource implements Closeable {
             mPreOpenThreshold = pPreOpenThreshold;
         } else {
             mPreOpenThreshold = 0.2F;
-            Log.w("System.err", "Using default PreOpenThreshold.");
+            System.err.println("Using default PreOpenThreshold.");
         }
         if (pPathFactory == null) {
             throw new NullPointerException("DiskBlockSliceSource constructor need a FilePathFactory instance, "
@@ -170,9 +168,9 @@ public final class DiskBlockSliceSource implements Closeable {
             try {
                 mFuture.get(5000L, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
-                Log.w("System.err", e);
+                e.printStackTrace();
             } catch (TimeoutException e) {
-                Log.w("System.err", e);
+                e.printStackTrace();
             } catch (ExecutionException e) {
                 Throwable tr = e;
                 while (tr.getCause() != null) {
