@@ -23,54 +23,116 @@ public final class SimpleTaskExecutor {
     private SimpleTaskExecutor() {}
 
     private static final byte[] CREATE_DESTROY_LOCK = new byte[0];
-    private static ScheduledExecutorService scheduledTaskService;
+    private static volatile ScheduledExecutorService scheduledTaskService;
 
     private static void createScheduledTaskService() {
         synchronized(CREATE_DESTROY_LOCK) {
             if (scheduledTaskService == null) {
                 final int cpuCount = Runtime.getRuntime().availableProcessors();
                 scheduledTaskService = new ScheduledThreadPoolExecutor(cpuCount * 2 + 1,
-                        new NameableThreadFactory("SimpleTaskExecutor-ScheduledThread"));
+                        new NameableThreadFactory("SimpleTaskExecutor-ScheduledThread")) {
+
+                    private volatile int mOldCorePoolSize = 0;
+                    private volatile boolean mIsFirstGlow = true;
+
+                    @Override
+                    protected void beforeExecute(Thread t, Runnable r) {
+                        super.beforeExecute(t, r);
+                        final int queueSize = getQueue().size();
+                        final int corePoolSize = getCorePoolSize();
+                        final int activeCount = getActiveCount();
+                        System.out.println("before: queueSize: " + queueSize
+                                + ", corePoolSize: " + corePoolSize + ", activeCount: " + activeCount);
+                        if (queueSize > (corePoolSize << 2) && activeCount == corePoolSize) {
+                            if (mIsFirstGlow) {
+                                mIsFirstGlow = false;
+                                mOldCorePoolSize = corePoolSize;
+                            }
+                            setCorePoolSize(corePoolSize << 2);
+                        }
+                    }
+
+                    @Override
+                    protected void afterExecute(Runnable r, Throwable t) {
+                        super.afterExecute(r, t);
+                        final int queueSize = getQueue().size();
+                        final int corePoolSize = getCorePoolSize();
+                        final int activeCount = getActiveCount();
+                        System.out.println("after: queueSize: " + queueSize
+                                + ", corePoolSize: " + corePoolSize + ", activeCount: " + activeCount);
+                        if (queueSize <= mOldCorePoolSize && corePoolSize != mOldCorePoolSize
+                                && mOldCorePoolSize > 0) {
+                            setCorePoolSize(mOldCorePoolSize);
+                        }
+                    }
+
+                };
             }
         }
     }
 
     /**
-     * 销毁方法, 应在非主线程调用, 且轻易不应调用, 直到进程即将结束. 此方法将企图销毁任何任务(使用interrupt方式),
-     * 包括正在执行的任务, 并不再接受新任务, 此后尽可能快的抛弃任何工作线程. 此方法较为激进, 应慎重考虑.
+     * 销毁方法, 应在非主线程调用, 且轻易不应调用, 直到进程即将结束.
      */
     public static void destroy() {
         synchronized(CREATE_DESTROY_LOCK) {
             if (scheduledTaskService != null) {
-                scheduledTaskService.shutdownNow();
+                scheduledTaskService.shutdown();
+                boolean terminated;
+                try {
+                    terminated = scheduledTaskService.awaitTermination(4000L, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    terminated = false;
+                }
+                if (!terminated) {
+                    scheduledTaskService.shutdownNow();
+                    try {
+                        scheduledTaskService.awaitTermination(1000L, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                    }
+                }
                 scheduledTaskService = null;
             }
         }
     }
 
-    /** 创建一个工作者Thread对象并启动, 强制赋值线程名, 强制限制继承Thread类 */
-    public static Thread startWorkThread(String name, Runnable runnable) {
-        Thread thread = new Thread(runnable, name);
+    /**
+     * 创建一个工作者Thread对象并启动, 强制赋值线程名, 强制限制继承Thread类(而是使用Task描述待执行的任务);
+     * 注意: 仅应在需要非常高的优先级, 线程中存在死循环的情况下考虑调用此方法, 一般任务应考虑schedule系列方法;
+     */
+    @Deprecated
+    public static Thread startWorkThread(Task task) {
+        Thread thread = new Thread(task, task.getName());
         thread.start();
         return thread;
     }
 
-    /** 创建一个工作者Handler线程 */
+    /** 辅助方法: 创建一个工作者Handler线程, 用于post Runnable或send Message. */
     public static Handler createWorkHandler(String name) {
         HandlerThread handlerThread = new HandlerThread(name);
         handlerThread.start();
         return new Handler(handlerThread.getLooper());
     }
 
-    /** 创建一个工作者Handler线程 */
+    /** 辅助方法: 创建一个工作者Handler线程, 用于post Runnable或send Message. */
     public static Handler createWorkHandler(String name, Handler.Callback callback) {
         HandlerThread handlerThread = new HandlerThread(name);
         handlerThread.start();
         return new Handler(handlerThread.getLooper(), callback);
     }
 
-    /** 在目前为止提交的所有消息处理完或任务执行完后, 以delayMillis毫秒的延迟结束HandlerThread */
-    public static void destroyHandlerAfterAllHandle(Handler handler, long delayMillis) {
+    /**
+     * 在目前为止提交的所有消息处理完或任务执行完后, 以delayMillis毫秒的延迟结束HandlerThread; <br/>
+     * Example:<br/>
+     * <pre> {@code
+     *  Handler handler = createWorkHandler("Send-Three-Request");
+     *   handler.post(new RequestTask("One"));
+     *   handler.post(new RequestTask("Two"));
+     *   handler.sendEmptyMessageDelayed(THREE, 100L);
+     *   destroyHandlerAfterAllHandle(handler, 10 * 1000L);
+     * } </pre>
+     */
+    public static void destroyHandqlerAfterAllHandle(Handler handler, long delayMillis) {
         final Looper looper = handler.getLooper();
         handler.postDelayed(new Runnable() {
             @Override
@@ -81,7 +143,7 @@ public final class SimpleTaskExecutor {
     }
 
     /** 让线程池立即异步执行任务. */
-    public static ScheduledFuture<?> schedule(@NonNull Task task) {
+    public static ScheduledFuture<?> scheduleNow(@NonNull Task task) {
         if (scheduledTaskService == null) {
             createScheduledTaskService();
         }
@@ -113,7 +175,8 @@ public final class SimpleTaskExecutor {
     }
 
     /**
-     * 安全的抽象任务类, 仅供参考
+     * 安全的抽象任务类, 仅供参考.
+     * @see com.johnsoft.library.util.DefaultTask
      */
     public static abstract class AbstractSafeTask implements Task {
         @Override
