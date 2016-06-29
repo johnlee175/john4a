@@ -1,4 +1,4 @@
-package com.johnsoft.library.util.thread;
+package com.johnsoft.library.util;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
