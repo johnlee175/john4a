@@ -96,7 +96,7 @@ public class MediaPlayerDocker implements MediaPlayer.OnCompletionListener {
     @Override
     public void onCompletion(MediaPlayer mp) {
         for (MediaPlayerDocker.OnCompletionListener onCompletionListener : set) {
-            SimpleTaskExecutor.schedule(new OnCompletionRunnable(this, onCompletionListener));
+            SimpleTaskExecutor.scheduleNow(new OnCompletionRunnable(this, onCompletionListener));
         }
     }
 
