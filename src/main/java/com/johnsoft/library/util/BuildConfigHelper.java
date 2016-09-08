@@ -47,14 +47,14 @@ public final class BuildConfigHelper {
             return helper;
         }
         helper = new BuildConfigHelper();
-        helper.debug = (boolean) getBuildConfigValue(appContext, "DEBUG");
-        helper.applicationId = (String) getBuildConfigValue(appContext, "APPLICATION_ID");
-        helper.buildType = (String) getBuildConfigValue(appContext, "BUILD_TYPE");
-        helper.flavor = (String) getBuildConfigValue(appContext, "FLAVOR");
-        helper.versionName = (String) getBuildConfigValue(appContext, "VERSION_NAME");
-        helper.versionCode = (int) getBuildConfigValue(appContext, "VERSION_CODE");
+        helper.debug = getBuildConfigValue(packageName, "DEBUG", boolean.class);
+        helper.applicationId = getBuildConfigValue(packageName, "APPLICATION_ID", String.class);
+        helper.buildType = getBuildConfigValue(packageName, "BUILD_TYPE", String.class);
+        helper.flavor = getBuildConfigValue(packageName, "FLAVOR", String.class);
+        helper.versionName = getBuildConfigValue(packageName, "VERSION_NAME", String.class);
+        helper.versionCode = getBuildConfigValue(packageName, "VERSION_CODE", int.class);
         for (String field: customBuildConfigFields) {
-            helper.customBuildConfigFields.put(field, getBuildConfigValue(appContext, field));
+            helper.customBuildConfigFields.put(field, getBuildConfigValue(packageName, field, Object.class));
         }
         sBuildConfigHelpers.put(packageName, helper);
         return helper;
@@ -72,12 +72,17 @@ public final class BuildConfigHelper {
         return currentHelper;
     }
 
-    private static Object getBuildConfigValue(Context context, String fieldName) {
+    private static <T> T getBuildConfigValue(String packageName, String fieldName, Class<T> klass) {
         try {
-            Class<?> clazz = Class.forName(context.getPackageName() + ".BuildConfig");
+            Class<?> clazz = Class.forName(packageName + ".BuildConfig");
             Field field = clazz.getField(fieldName);
-            field.setAccessible(true);
-            return field.get(null);
+            if (field != null) {
+                field.setAccessible(true);
+                Object constant = field.get(null);
+                if (constant != null) {
+                    return klass.cast(constant);
+                }
+            }
         } catch (Throwable e) {
             e.printStackTrace();
         }

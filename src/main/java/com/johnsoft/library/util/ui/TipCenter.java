@@ -23,7 +23,8 @@ public final class TipCenter {
 
     /** 首先要调用此方法以初始化 */
     public static void setApplicationContext(@NonNull Context context) {
-        appCtx = context.getApplicationContext();
+        final Context baseContext = context.getApplicationContext();
+        appCtx = baseContext == null ? context : baseContext;
     }
 
     public static void showInstanceToast(String type, CharSequence textStr, boolean shortDuration) {
