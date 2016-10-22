@@ -1,153 +1,92 @@
+/*
+ * Copyright (C) 2007 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.johnsoft.library.util.animation;
 
-import com.johnsoft.library.R;
-
-import android.content.Context;
-import android.content.res.TypedArray;
-import android.graphics.Camera;
-import android.graphics.Matrix;
-import android.util.AttributeSet;
-import android.util.TypedValue;
 import android.view.animation.Animation;
 import android.view.animation.Transformation;
+import android.graphics.Camera;
+import android.graphics.Matrix;
 
-public abstract class Rotate3dAnimation extends Animation
-{
+/**
+ * An animation that rotates the view on the Y axis between two specified angles.
+ * This animation also adds a translation on the Z axis (depth) to improve the effect.
+ */
+public class Rotate3dAnimation extends Animation {
+    private final float mFromDegrees;
+    private final float mToDegrees;
+    private final float mCenterX;
+    private final float mCenterY;
+    private final float mDepthZ;
+    private final boolean mReverse;
     private Camera mCamera;
 
-    private float mFromDegrees;
-    private float mToDegrees;
-    private int mPivotXType;
-    private int mPivotYType;
-    private float mPivotXValue;
-    private float mPivotYValue;
-    private float mPivotX;
-    private float mPivotY;
-    private float mCameraDistance;
-    // 是否需要扭曲
-    private boolean mReverse;
-
-    public Rotate3dAnimation(Context context, AttributeSet attrs)
-    {
-        super(context, attrs);
-
-        TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.Rotate3dAnimation);
-
-        mFromDegrees = a.getFloat(R.styleable.Rotate3dAnimation_fromDegrees, 0.0f);
-        mToDegrees = a.getFloat(R.styleable.Rotate3dAnimation_toDegrees, 0.0f);
-
-        Description d = Description.parseValue(a.peekValue(R.styleable.Rotate3dAnimation_pivotX));
-        mPivotXType = d.type;
-        mPivotXValue = d.value;
-
-        d = Description.parseValue(a.peekValue(R.styleable.Rotate3dAnimation_pivotY));
-        mPivotYType = d.type;
-        mPivotYValue = d.value;
-        
-        mCameraDistance = a.getFloat(R.styleable.Rotate3dAnimation_cameraDistance, 0.0f);
-        mReverse = a.getBoolean(R.styleable.Rotate3dAnimation_reverse, false);
-
-        a.recycle();
-
-        if (mPivotXType == ABSOLUTE)
-        {
-            mPivotX = mPivotXValue;
-        }
-        if (mPivotYType == ABSOLUTE)
-        {
-            mPivotY = mPivotYValue;
-        }
-    }
-
-    public Rotate3dAnimation(float fromDegrees, float toDegrees, float pivotX, float pivotY, float cameraDistance, boolean reverse)
-    {
+    /**
+     * Creates a new 3D rotation on the Y axis. The rotation is defined by its
+     * start angle and its end angle. Both angles are in degrees. The rotation
+     * is performed around a center point on the 2D space, definied by a pair
+     * of X and Y coordinates, called centerX and centerY. When the animation
+     * starts, a translation on the Z axis (depth) is performed. The length
+     * of the translation can be specified, as well as whether the translation
+     * should be reversed in time.
+     *
+     * @param fromDegrees the start angle of the 3D rotation
+     * @param toDegrees the end angle of the 3D rotation
+     * @param centerX the X center of the 3D rotation
+     * @param centerY the Y center of the 3D rotation
+     * @param reverse true if the translation should be reversed, false otherwise
+     */
+    public Rotate3dAnimation(float fromDegrees, float toDegrees,
+            float centerX, float centerY, float depthZ, boolean reverse) {
         mFromDegrees = fromDegrees;
         mToDegrees = toDegrees;
-        mPivotXType = ABSOLUTE;
-        mPivotYType = ABSOLUTE;
-        mPivotX = mPivotXValue = pivotX;
-        mPivotY = mPivotYValue = pivotY;
-        mCameraDistance = cameraDistance;
+        mCenterX = centerX;
+        mCenterY = centerY;
+        mDepthZ = depthZ;
         mReverse = reverse;
     }
 
     @Override
-    public void initialize(int width, int height, int parentWidth, int parentHeight)
-    {
+    public void initialize(int width, int height, int parentWidth, int parentHeight) {
         super.initialize(width, height, parentWidth, parentHeight);
-        mPivotX = resolveSize(mPivotXType, mPivotXValue, width, parentWidth);
-        mPivotY = resolveSize(mPivotYType, mPivotYValue, height, parentHeight);
         mCamera = new Camera();
     }
 
     @Override
-    protected void applyTransformation(float interpolatedTime, Transformation t)
-    {
-        final float fromDegrees = mFromDegrees, toDegrees = mToDegrees;
-        final float degrees = fromDegrees + ((toDegrees - fromDegrees) * interpolatedTime);
+    protected void applyTransformation(float interpolatedTime, Transformation t) {
+        final float fromDegrees = mFromDegrees;
+        float degrees = fromDegrees + ((mToDegrees - fromDegrees) * interpolatedTime);
+
+        final float centerX = mCenterX;
+        final float centerY = mCenterY;
         final Camera camera = mCamera;
+
         final Matrix matrix = t.getMatrix();
+
         camera.save();
-        if (mReverse)
-        {
-            camera.translate(0.0f, 0.0f, mCameraDistance * interpolatedTime);
-        } else
-        {
-            camera.translate(0.0f, 0.0f, mCameraDistance * (1.0f - interpolatedTime));
+        if (mReverse) {
+            camera.translate(0.0f, 0.0f, mDepthZ * interpolatedTime);
+        } else {
+            camera.translate(0.0f, 0.0f, mDepthZ * (1.0f - interpolatedTime));
         }
-        doRotate(camera, degrees);
+        camera.rotateY(degrees);
         camera.getMatrix(matrix);
         camera.restore();
-        
-        final float scale = getScaleFactor();
-//        final float centerX = mPivotX;
-//        final float centerY = mPivotY;
-        final float centerX = mPivotX * scale;
-        final float centerY = mPivotY * scale;
+
         matrix.preTranslate(-centerX, -centerY);
         matrix.postTranslate(centerX, centerY);
-    }
-    
-    protected abstract void doRotate(Camera camera, float degrees);
-
-    protected static class Description
-    {
-
-        public int type;
-
-        public float value;
-
-        static Description parseValue(TypedValue value)
-        {
-            Description d = new Description();
-            if (value == null)
-            {
-                d.type = ABSOLUTE;
-                d.value = 0;
-            } else
-            {
-                if (value.type == TypedValue.TYPE_FRACTION)
-                {
-                    d.type = (value.data & TypedValue.COMPLEX_UNIT_MASK) == TypedValue.COMPLEX_UNIT_FRACTION_PARENT ? RELATIVE_TO_PARENT : RELATIVE_TO_SELF;
-                    d.value = TypedValue.complexToFloat(value.data);
-                    return d;
-                } else if (value.type == TypedValue.TYPE_FLOAT)
-                {
-                    d.type = ABSOLUTE;
-                    d.value = value.getFloat();
-                    return d;
-                } else if (value.type >= TypedValue.TYPE_FIRST_INT && value.type <= TypedValue.TYPE_LAST_INT)
-                {
-                    d.type = ABSOLUTE;
-                    d.value = value.data;
-                    return d;
-                }
-            }
-
-            d.type = ABSOLUTE;
-            d.value = 0.0f;
-
-            return d;
-        }
     }
 }
