@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.support.v4.app.FragmentActivity;
 import android.telephony.TelephonyManager;
@@ -31,6 +33,7 @@ public class BaseApplication extends Application
 				Context.TELEPHONY_SERVICE);
 		map.put("device_id", tm.getDeviceId());
 		map.put("os_type", "Android " + Build.VERSION.RELEASE);
+		map.put("main_handler", new Handler(Looper.getMainLooper()));
 		try
 		{
 			map.put("app_version",
@@ -68,6 +71,10 @@ public class BaseApplication extends Application
 	public Object removeExtra(String key)
 	{
 		return map.remove(key);
+	}
+
+	public Handler getMainHandler() {
+		return (Handler) map.get("main_handler");
 	}
 
 	public void addActivity(FragmentActivity activity)

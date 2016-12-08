@@ -16,9 +16,17 @@
  */
 package com.johnsoft.library.util.ui;
 
-import android.app.AlertDialog;
+import com.johnsoft.library.R;
+import com.johnsoft.library.template.BaseApplication;
+
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.res.Resources;
+import android.os.Handler;
+import android.support.v7.app.AlertDialog;
+import android.view.Window;
+import android.view.WindowManager;
+import android.widget.ListView;
 import android.widget.NumberPicker;
 import android.widget.RelativeLayout;
 
@@ -46,7 +54,7 @@ public final class DialogUtilities {
         relativeLayout.setLayoutParams(params);
         relativeLayout.addView(numberPicker,numberPickerParams);
 
-        AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(context);
+        AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(context, R.style.AppAlertDialogTheme);
         alertDialogBuilder.setTitle("Pick A Number");
         alertDialogBuilder.setView(relativeLayout);
         alertDialogBuilder
@@ -65,5 +73,56 @@ public final class DialogUtilities {
                 });
         final AlertDialog alertDialog = alertDialogBuilder.create();
         alertDialog.show();
+    }
+
+    public static void showSelectDialog(String title, String message, String[] items,
+                                        final OnItemSelectedListener listener) {
+        final Context appContext = BaseApplication.getApplication();
+        final Handler mainHandler = BaseApplication.getApplication().getMainHandler();
+        final Resources resources = appContext.getResources();
+        final DialogInterface.OnClickListener l = new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                if (which == DialogInterface.BUTTON_POSITIVE) {
+                    try {
+                        if (listener != null) {
+                            final ListView listView = ((AlertDialog) dialog).getListView();
+                            int position = listView.getCheckedItemPosition();
+                            String item = (String) listView.getAdapter().getItem(position);
+                            listener.onItemSelected(item, position);
+                        }
+                    } finally {
+                        dialog.dismiss();
+                    }
+                } else {
+                    dialog.cancel();
+                }
+            }
+        };
+        final AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(appContext,
+                R.style.AppAlertDialogTheme);
+        alertDialogBuilder.setTitle(title + " - " + message)
+                .setSingleChoiceItems(items, 0, null)
+                .setPositiveButton(resources.getString(R.string.ok), l)
+                .setNegativeButton(resources.getString(R.string.cancel), l);
+        final AlertDialog alertDialog = alertDialogBuilder.create();
+        final Window window = alertDialog.getWindow();
+        if (window != null) {
+            window.setType(WindowManager.LayoutParams.TYPE_TOAST);
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                    | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                    | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                alertDialog.show();
+            }
+        });
+    }
+
+    public interface OnItemSelectedListener {
+        void onItemSelected(String item, int position);
     }
 }
