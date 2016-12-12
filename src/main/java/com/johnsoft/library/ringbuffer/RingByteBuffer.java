@@ -30,10 +30,41 @@ public class RingByteBuffer {
     private int readPointer;
     private int writerPointer;
     private int round;
+    private boolean isEmpty;
 
     public RingByteBuffer(int size) {
         this.buffer = new byte[size];
         this.size = size;
+    }
+
+    public synchronized void write(byte[] x) {
+        write(x, 0, x.length);
+    }
+
+    /** no parameters bounds check */
+    public synchronized void write(byte[] x, int offset, int length) {
+        for (int i = 0; i < length; ++i) {
+            write(x[offset + i]);
+        }
+    }
+
+    public synchronized int read(byte[] x) {
+        return read(x, 0, x.length);
+    }
+
+    /** no parameters bounds check */
+    public synchronized int read(byte[] x, int offset, int length) {
+        int readCount = 0;
+        while (readCount < length) {
+            final byte b = read();
+            if (!isEmpty) {
+                x[offset++] = b;
+                ++readCount;
+            } else {
+                break;
+            }
+        }
+        return readCount;
     }
 
     public synchronized void write(byte x) {
@@ -50,9 +81,12 @@ public class RingByteBuffer {
         }
     }
 
+    /** please check isEmpty() to avoid read invalid data. */
     public synchronized byte read() {
+        isEmpty = false;
         if (readPointer == writerPointer && round == 0L) { // is empty
-            return Byte.MIN_VALUE; // return null;
+            isEmpty = true;
+            return 0;
         }
         byte result = buffer[readPointer];
         if (++readPointer >= size) {
@@ -60,6 +94,10 @@ public class RingByteBuffer {
             readPointer = readPointer % size;
         }
         return result;
+    }
+
+    public synchronized boolean isEmpty() {
+        return isEmpty;
     }
 
     @Override
