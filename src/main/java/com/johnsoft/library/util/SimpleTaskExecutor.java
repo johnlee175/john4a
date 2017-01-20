@@ -1,5 +1,6 @@
 package com.johnsoft.library.util;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -24,6 +25,7 @@ public final class SimpleTaskExecutor {
 
     private static final byte[] CREATE_DESTROY_LOCK = new byte[0];
     private static volatile ScheduledExecutorService scheduledTaskService;
+    private static final ConcurrentHashMap<String, Handler> namedHandlers = new ConcurrentHashMap<>();
 
     private static void createScheduledTaskService() {
         synchronized(CREATE_DESTROY_LOCK) {
@@ -108,17 +110,41 @@ public final class SimpleTaskExecutor {
     }
 
     /** 辅助方法: 创建一个工作者Handler线程, 用于post Runnable或send Message. */
-    public static Handler createWorkHandler(String name) {
-        HandlerThread handlerThread = new HandlerThread(name);
-        handlerThread.start();
-        return new Handler(handlerThread.getLooper());
+    public static Handler createWorkHandler(final String name) {
+        return createWorkHandler(name, null, false);
     }
 
     /** 辅助方法: 创建一个工作者Handler线程, 用于post Runnable或send Message. */
-    public static Handler createWorkHandler(String name, Handler.Callback callback) {
-        HandlerThread handlerThread = new HandlerThread(name);
-        handlerThread.start();
-        return new Handler(handlerThread.getLooper(), callback);
+    public static Handler createWorkHandler(final String name, final Handler.Callback callback,
+                                            final boolean isPrivateHandler) {
+        if (isPrivateHandler) {
+            HandlerThread handlerThread = new HandlerThread(name);
+            handlerThread.start();
+            if (callback == null) {
+                return new Handler(handlerThread.getLooper());
+            } else {
+                return new Handler(handlerThread.getLooper(), callback);
+            }
+        } else {
+            Handler handler;
+            if ((handler = namedHandlers.get(name)) != null) {
+                return handler;
+            }
+            HandlerThread handlerThread = new H(name, new Runnable() {
+                @Override
+                public void run() {
+                    namedHandlers.remove(name);
+                }
+            });
+            handlerThread.start();
+            if (callback == null) {
+                handler = new Handler(handlerThread.getLooper());
+            } else {
+                handler = new Handler(handlerThread.getLooper(), callback);
+            }
+            namedHandlers.put(name, handler);
+            return handler;
+        }
     }
 
     /**
@@ -191,5 +217,30 @@ public final class SimpleTaskExecutor {
         public abstract void doTask();
         /** 任何异常或错误都可能或可以调用该方法 */
         public abstract void onThrowable(Throwable t);
+    }
+
+    private static final class H extends HandlerThread {
+        private final Runnable whenQuit;
+
+        public H(String name, Runnable whenQuit) {
+            super(name);
+            this.whenQuit = whenQuit;
+        }
+
+        public H(String name, int priority, Runnable whenQuit) {
+            super(name, priority);
+            this.whenQuit = whenQuit;
+        }
+
+        @Override
+        public void run() {
+            try {
+                super.run();
+            } finally {
+                if (whenQuit != null) {
+                    whenQuit.run();
+                }
+            }
+        }
     }
 }
