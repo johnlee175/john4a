@@ -25,6 +25,7 @@ import android.net.NetworkInfo;
 import android.net.wifi.ScanResult;
 import android.net.wifi.SupplicantState;
 import android.net.wifi.WifiConfiguration;
+import android.net.wifi.WifiEnterpriseConfig;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -170,21 +171,32 @@ public final class WifiAutoConnector {
 
     @TargetApi(18)
     private void reconfigIfApplyEap(WifiConfiguration wc, String password) {
-        if (eapMethod != -1 && phase2Method != -1) {
-            wc.preSharedKey = "";
+        if (identity != null && !identity.trim().isEmpty() && eapMethod >= 0) {
+            wc.preSharedKey = null;
+            wc.allowedKeyManagement.clear();
             wc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_EAP);
             wc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.IEEE8021X);
             wc.enterpriseConfig.setPassword(password);
-            wc.enterpriseConfig.setEapMethod(eapMethod);
-            wc.enterpriseConfig.setPhase2Method(phase2Method);
             wc.enterpriseConfig.setIdentity(identity);
+            wc.enterpriseConfig.setEapMethod(eapMethod);
+            if (phase2Method < 0) {
+                phase2Method = WifiEnterpriseConfig.Phase2.NONE;
+            }
+            wc.enterpriseConfig.setPhase2Method(phase2Method);
+            if (anonymousIdentity != null && anonymousIdentity.trim().isEmpty()) {
+                anonymousIdentity = null;
+            }
             wc.enterpriseConfig.setAnonymousIdentity(anonymousIdentity);
+            if (caCertificate != null) {
             try {
                 CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
                 X509Certificate cert = (X509Certificate) certFactory.generateCertificate(caCertificate);
                 wc.enterpriseConfig.setCaCertificate(cert);
             } catch (CertificateException e) {
                 e.printStackTrace();
+            }
+            } else {
+                wc.enterpriseConfig.setCaCertificate(null);
             }
         }
     }
@@ -310,9 +322,11 @@ public final class WifiAutoConnector {
             WifiInfo wifiInfo = wifiManager.getConnectionInfo();
             if (wifiInfo != null && wifiInfo.getSSID().equals(ssid)) {
                 SupplicantState supplicantState = wifiInfo.getSupplicantState();
-                if (supplicantState != null) {
+                if (supplicantState != null && supplicantState.equals(SupplicantState.COMPLETED)) {
                     NetworkInfo.DetailedState detailedState = WifiInfo.getDetailedStateOf(supplicantState);
-                    if (detailedState != null && detailedState == NetworkInfo.DetailedState.CONNECTED) {
+                    if (detailedState != null
+                            && (detailedState.equals(NetworkInfo.DetailedState.CONNECTED)
+                                        || detailedState.equals(NetworkInfo.DetailedState.OBTAINING_IPADDR))) {
                         return true;
                     }
                 }
@@ -384,7 +398,11 @@ public final class WifiAutoConnector {
                 if (!reconnectSuccessful) {
                     log("wifiManager.reconnect() -> failed");
                 }
-                return saveSuccessful && reconnectSuccessful;
+                boolean reassociateSuccessful = wifiManager.reassociate();
+                if (!reassociateSuccessful) {
+                    log("wifiManager.reassociate() -> failed");
+                }
+                return saveSuccessful && reconnectSuccessful && reassociateSuccessful;
             } else {
                 log("wifiManager.enableNetwork(int, true) -> failed");
             }
